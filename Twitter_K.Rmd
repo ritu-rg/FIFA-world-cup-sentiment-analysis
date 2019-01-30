@@ -1,0 +1,267 @@
+
+```{r}
+# Import libraries
+library(ggplot2)
+library(readr)
+library(dplyr)
+#library(caret)
+#library(magrittr)
+#library(ggforce)
+library(igraph)
+library(ggraph)
+library(tidytext)
+#library(tidyverse)
+library(stringr)
+library(tidyr)
+library(scales)
+library(gridExtra)
+library(plotly)
+library(ggthemes)
+library(RColorBrewer)
+```
+
+
+```{r}
+# Read data
+setwd("C:\\Users\\Ritu\\Documents\\Learning\\Self\\DS\\Twitter\\ip")
+data <- read_csv("FIFA.csv", stringsAsFactors=FALSE, sep = "," , header = TRUE,
+                 colClasses = c("character", "character", "Date", "character", "integer", "character", "character", 
+                                "integer", "integer", "character", "character", "character", "character", "character",
+                                "integer", "integer"))
+
+```
+
+
+```{r}
+
+options(digits=2)
+options(scipen=999)
+
+
+# View data
+dim(data)
+names(data)
+str(data)
+head(data)
+```
+
+
+```{r}
+# converting to tidy text
+tidy_new <- data %>% unnest_tokens(word_new, Tweet) %>% filter(!word_new %in% stop_words$word,
+         str_detect(word_new, "[a-z]"))
+
+
+```
+
+
+
+```{r}
+# Count of most used words in tweets
+c <- tidy_new %>% count(word_new, sort=TRUE) %>% filter(n > 7500) %>% mutate(word = reorder(word_new, n))
+
+colourCount = nrow(c)
+colors_new <- c('#C39BD3', '#F9E79F', '#E6B0AA', '#AAB7B8', '#A9DFBF', '#BA4A00', '#7FB3D5')
+# getPalette = colorRampPalette(colors_new)
+getPalette = colorRampPalette(brewer.pal(9, "PuBu"))
+
+tidy_new %>%
+  count(word_new, sort = TRUE) %>%
+  filter(n > 7500) %>%
+  mutate(word = reorder(word_new, n)) %>%
+  ggplot(aes(word, n, fill=getPalette(colourCount))) +
+  geom_col(show.legend = FALSE) +
+  xlab(NULL) +
+  theme_bw(base_size = 18)  +
+  scale_fill_manual(values=getPalette(colourCount)) +
+  theme(axis.ticks = element_blank()) + 
+  coord_flip()
+```
+
+
+```{r}
+# Words at beginning or end of tweets
+word_averages <- tidy_new %>%
+  mutate(word_position = row_number() / n()) %>%
+  group_by(word_new) %>%
+  summarize(median_position = median(word_position),
+            number = n())
+
+
+start_end_words <- word_averages %>%
+  filter(number >= 100) %>%
+  arrange(desc(median_position)) %>%
+  slice(c(1:15, n():(n() - 14)))
+
+    
+start_end_words %>%
+  mutate(word = reorder(word_new, -median_position),
+         direction = ifelse(median_position < .5, "Beginning", "End")) %>%
+  ggplot(aes(median_position, word, color = direction)) +
+  geom_errorbarh(aes(xmin = .5, xmax = median_position), height = 0, size=4) +
+  geom_vline(xintercept = .5, lty = 2) +
+  scale_x_continuous(labels = percent_format()) +
+  labs(x = "Median position of words within Tweets",
+       y = "",
+       title = "Words most shifted towards the beginning or end of a Tweet",
+       subtitle = "Of words with at least 500 occurences across all tweets",
+       color = "")
+
+    
+```
+
+
+```{r}
+# Word freq by Source - FB/Insta
+frequency <- tidy_new %>% 
+  group_by(Source) %>% 
+  count(word_new, sort = TRUE) %>% 
+  left_join(tidy_new %>% 
+              group_by(Source) %>% 
+              summarise(total = n())) %>%
+  mutate(freq = n/total)
+
+frequency <- frequency %>% 
+  select(Source, word_new, freq) %>% 
+  spread(Source, freq) %>%
+  arrange(Facebook,Instagram)
+
+#frequency
+
+ggplot(frequency, aes(Facebook,Instagram)) +
+  geom_jitter(alpha = 0.6, size = 2.5, width = 0.25, height = 0.25, color="violetred3") +
+  geom_text(aes(label = word_new), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  geom_abline(color = "red")  + 
+  theme_minimal(base_size = 15) + 
+  theme(axis.text.x=element_blank())  +
+  theme(axis.text.y=element_blank())
+
+
+
+```
+
+
+```{r}
+# Word freq by Source -Twitter for Iphone/Android
+
+frequency <- tidy_new %>% 
+  group_by(Source) %>% 
+  count(word_new, sort = TRUE) %>% 
+  left_join(tidy_new %>% 
+              group_by(Source) %>% 
+              summarise(total = n())) %>%
+  mutate(freq = n/total)
+
+frequency <- frequency %>% 
+  select(Source, word_new, freq) %>% 
+  spread(Source, freq) %>%
+  arrange(`Twitter for iPhone`,`Twitter for Android`)
+
+frequency %>% count(Source)
+
+ggplot(frequency, aes(`Twitter for iPhone`,`Twitter for Android`)) +
+  geom_jitter(alpha = 0.3, size = 1.5, width = 0.15, height = 0.15, color="turquoise3") +
+  geom_text(aes(label = word_new), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  geom_abline(color = "red") + 
+  theme_bw()  +
+  theme(axis.text.x=element_blank())  +
+  theme(axis.text.y=element_blank())
+
+
+```
+
+
+```{r}
+# Top words per Twitter Sources 
+# Method 1 - using join to get top words per group
+top_groups <- tidy_new %>% 
+  group_by(Source) %>%  
+  summarise(total = n()) %>%
+  top_n(n=9, wt=total) %>%
+  arrange(desc(total)) %>%
+  filter(grepl('Twitter|TweetDeck',Source),total>100)  
+
+top_words_per_group <- tidy_new %>% 
+  group_by(Source,word_new) %>% 
+  inner_join(top_groups, by="Source") %>% 
+  summarise(total = n())  %>%
+  arrange(desc(total)) %>%
+  slice(1:10) #%>%
+  #count(Source)
+
+# Facet wrap
+top_words_per_group %>%
+  ggplot(aes(total, word_new, color=word_new)) +
+  geom_errorbarh(aes(xmin = .5, xmax = total), height = 0, size=10) +
+  facet_wrap(~Source, ncol = 3, scales =  "free") +
+  theme_bw(base_size = 18) + 
+  theme(axis.text.x=element_blank()) + 
+  theme(axis.title =element_blank()) + 
+  theme(axis.ticks = element_blank())
+
+
+
+
+
+```
+
+
+```{r}
+# tfidf by SOurce 
+tf_new <- tidy_new %>%
+  count(Source, word_new, sort=TRUE) %>%
+  ungroup() %>%
+  bind_tf_idf(word_new, Source, n)  %>%
+  filter(grepl('Twitter for Android|Twitter for iPhone|Twitter Web Client$|Twitter Lite|TweetDeck|Twitter for iPad',Source))  %>%
+  arrange(desc(tf_idf)) 
+
+
+tf_new %>% 
+  group_by(Source) %>% 
+  top_n(15, tf_idf) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word_new, tf_idf)) %>%
+  ggplot(aes(word, tf_idf, fill = word)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~Source, ncol = 3, scales = "free") +
+  theme_bw(base_size = 18) + 
+  theme(axis.text.x=element_blank()) + 
+  theme(axis.ticks = element_blank()) + 
+  coord_flip()
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
